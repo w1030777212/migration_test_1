@@ -1,9 +1,6 @@
 name: Bytebase Release demo - create plan only
 
 on:
-  push:
-    branches: [main]
-    paths: ["migrations/*.sql"]
   workflow_dispatch:
 
 permissions:
