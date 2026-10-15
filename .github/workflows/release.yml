@@ -1,0 +1,69 @@
+name: Bytebase Release demo - create plan only
+
+on:
+  push:
+    branches: [main]
+    paths: ["migrations/*.sql"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BYTEBASE_URL: https://cloud.bytebase.com
+  BYTEBASE_WORKLOAD_IDENTITY: release-demo-20261015@gha-wdhk.workload.bytebase.com
+  BYTEBASE_PROJECT: projects/gha-wdhk
+
+jobs:
+  create-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    container:
+      image: bytebase/bytebase-action
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exchange GitHub OIDC token
+        id: bytebase-auth
+        shell: sh
+        run: |
+          set -eu
+          OIDC_TOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase" | jq -er '.value')
+          echo "::add-mask::$OIDC_TOKEN"
+          ACCESS_TOKEN=$(curl -fsS -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg token "$OIDC_TOKEN" --arg email "$BYTEBASE_WORKLOAD_IDENTITY" '{token:$token,email:$email}')" \
+            | jq -er '.accessToken')
+          echo "::add-mask::$ACCESS_TOKEN"
+          echo "access-token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Check release SQL
+        shell: sh
+        run: |
+          set -eu
+          bytebase-action check \
+            --url="$BYTEBASE_URL" \
+            --access-token="${{ steps.bytebase-auth.outputs.access-token }}" \
+            --project="$BYTEBASE_PROJECT" \
+            --targets=projects/gha-wdhk/instances/sample-d3ecb82fcfd87e08/databases/bb_sample_c2c0430cc93711a1 \
+            --file-pattern='migrations/*.sql'
+      - name: Create release and plan
+        shell: sh
+        run: |
+          set -eu
+          bytebase-action rollout \
+            --url="$BYTEBASE_URL" \
+            --access-token="${{ steps.bytebase-auth.outputs.access-token }}" \
+            --project="$BYTEBASE_PROJECT" \
+            --targets=projects/gha-wdhk/instances/sample-d3ecb82fcfd87e08/databases/bb_sample_c2c0430cc93711a1 \
+            --file-pattern='migrations/*.sql' \
+            --output="${{ runner.temp }}/bytebase-metadata.json"
+      - name: Show plan link
+        shell: sh
+        run: |
+          set -eu
+          PLAN=$(jq -er '.plan' "${{ runner.temp }}/bytebase-metadata.json")
+          PLAN_ID=${PLAN##*/}
+          echo "### Bytebase plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "[$PLAN]($BYTEBASE_URL/$BYTEBASE_PROJECT/plans/$PLAN_ID)" >> "$GITHUB_STEP_SUMMARY"
