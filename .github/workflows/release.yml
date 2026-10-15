@@ -1,7 +1,17 @@
 name: Bytebase Release demo - create plan only
+run-name: Release demo ${{ inputs.release_set }} - create plan
 
 on:
   workflow_dispatch:
+    inputs:
+      release_set:
+        description: "A: first 3 versions; B: all 4 versions"
+        required: true
+        type: choice
+        default: A
+        options:
+          - A
+          - B
 
 permissions:
   contents: read
@@ -10,6 +20,8 @@ env:
   BYTEBASE_URL: https://cloud.bytebase.com
   BYTEBASE_WORKLOAD_IDENTITY: release-demo-20261015@gha-wdhk.workload.bytebase.com
   BYTEBASE_PROJECT: projects/gha-wdhk
+  BYTEBASE_RELEASE_SET: ${{ inputs.release_set }}
+  BYTEBASE_FILE_PATTERN: ${{ inputs.release_set == 'A' && 'migrations/2026101400000[1-3]*.sql' || 'migrations/*.sql' }}
 
 jobs:
   create-plan:
@@ -18,7 +30,7 @@ jobs:
       contents: read
       id-token: write
     container:
-      image: bytebase/bytebase-action
+      image: bytebase/bytebase-action:cloud
     steps:
       - uses: actions/checkout@v4
       - name: Exchange GitHub OIDC token
@@ -61,7 +73,7 @@ jobs:
             --access-token="${{ steps.bytebase-auth.outputs.access-token }}" \
             --project="$BYTEBASE_PROJECT" \
             --targets=projects/gha-wdhk/instances/sample-d3ecb82fcfd87e08/databases/bb_sample_c2c0430cc93711a1 \
-            --file-pattern='migrations/*.sql'
+            --file-pattern="$BYTEBASE_FILE_PATTERN"
       - name: Create release and plan
         shell: sh
         run: |
@@ -71,7 +83,8 @@ jobs:
             --access-token="${{ steps.bytebase-auth.outputs.access-token }}" \
             --project="$BYTEBASE_PROJECT" \
             --targets=projects/gha-wdhk/instances/sample-d3ecb82fcfd87e08/databases/bb_sample_c2c0430cc93711a1 \
-            --file-pattern='migrations/*.sql' \
+            --file-pattern="$BYTEBASE_FILE_PATTERN" \
+            --release-id-template="demo_${BYTEBASE_RELEASE_SET}_{date}-RC{iteration}" \
             --output="${{ runner.temp }}/bytebase-metadata.json"
       - name: Show plan link
         shell: sh
