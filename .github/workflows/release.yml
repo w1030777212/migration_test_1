@@ -65,6 +65,8 @@ jobs:
           echo "::add-mask::$ACCESS_TOKEN"
           echo "access-token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
       - name: Check release SQL
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         shell: sh
         run: |
           set -eu
@@ -73,7 +75,8 @@ jobs:
             --access-token="${{ steps.bytebase-auth.outputs.access-token }}" \
             --project="$BYTEBASE_PROJECT" \
             --targets=projects/gha-wdhk/instances/sample-d3ecb82fcfd87e08/databases/bb_sample_c2c0430cc93711a1 \
-            --file-pattern="$BYTEBASE_FILE_PATTERN"
+            --file-pattern="$BYTEBASE_FILE_PATTERN" \
+            --check-release=FAIL_ON_ERROR
       - name: Create release and plan
         shell: sh
         run: |
