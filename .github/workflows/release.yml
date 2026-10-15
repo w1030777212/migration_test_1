@@ -26,13 +26,30 @@ jobs:
         shell: sh
         run: |
           set -eu
-          OIDC_TOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase" | jq -er '.value')
+          BB_OIDC_RESPONSE=$(mktemp)
+          BB_EXCHANGE_RESPONSE=$(mktemp)
+          trap 'rm -f "$BB_OIDC_RESPONSE" "$BB_EXCHANGE_RESPONSE"' EXIT
+          BB_OIDC_STATUS=$(curl -sS -o "$BB_OIDC_RESPONSE" -w '%{http_code}' \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase")
+          echo "GitHub OIDC HTTP $BB_OIDC_STATUS"
+          if [ "$BB_OIDC_STATUS" != "200" ]; then
+            jq -r '.message // "GitHub OIDC request failed"' "$BB_OIDC_RESPONSE"
+            exit 1
+          fi
+          OIDC_TOKEN=$(jq -er '.value' "$BB_OIDC_RESPONSE")
           echo "::add-mask::$OIDC_TOKEN"
-          ACCESS_TOKEN=$(curl -fsS -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
+          printf '%s' "$OIDC_TOKEN" | jq -R 'split(".")[1] | gsub("-";"+") | gsub("_";"/") | @base64d | fromjson | {iss,aud,sub,repository,ref}'
+          BB_EXCHANGE_STATUS=$(curl -sS -o "$BB_EXCHANGE_RESPONSE" -w '%{http_code}' \
+            -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
             -H "Content-Type: application/json" \
-            -d "$(jq -nc --arg token "$OIDC_TOKEN" --arg email "$BYTEBASE_WORKLOAD_IDENTITY" '{token:$token,email:$email}')" \
-            | jq -er '.accessToken')
+            -d "$(jq -nc --arg token "$OIDC_TOKEN" --arg email "$BYTEBASE_WORKLOAD_IDENTITY" '{token:$token,email:$email}')")
+          echo "Bytebase token exchange HTTP $BB_EXCHANGE_STATUS"
+          if [ "$BB_EXCHANGE_STATUS" != "200" ]; then
+            jq -r --arg token "$OIDC_TOKEN" '(.message // "Bytebase token exchange failed") | tostring | split($token) | join("[REDACTED]")' "$BB_EXCHANGE_RESPONSE"
+            exit 1
+          fi
+          ACCESS_TOKEN=$(jq -er '.accessToken' "$BB_EXCHANGE_RESPONSE")
           echo "::add-mask::$ACCESS_TOKEN"
           echo "access-token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
       - name: Check release SQL
